@@ -1,11 +1,16 @@
 package com.example.hp.kchat;
 
+import android.app.Dialog;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Build;
+import android.os.Environment;
 import android.support.annotation.NonNull;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.app.TaskStackBuilder;
@@ -16,10 +21,12 @@ import android.text.Editable;
 import android.text.InputFilter;
 import android.text.TextWatcher;
 import android.util.Log;
+import android.view.ContextMenu;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -47,17 +54,26 @@ import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
 
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.URL;
+import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static com.example.hp.kchat.MainActivity.progress_bar_type;
+
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
-
+    private int pos = 0 ;
     public static final String ANONYMOUS = "anonymous";
     public static final int DEFAULT_MSG_LENGTH_LIMIT = 1000;
 
@@ -91,6 +107,15 @@ public class MainActivity extends AppCompatActivity {
 
     private String notifications;
 
+    private ProgressDialog pDialog;
+
+
+    // Progress dialog type (0 - for Horizontal progress bar)
+    public static final int progress_bar_type = 0;
+
+    // File url to download
+    private static String file_url;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -119,6 +144,8 @@ public class MainActivity extends AppCompatActivity {
         List<FriendlyMessage> friendlyMessages = new ArrayList<>();
         mMessageAdapter = new MessageAdapter(this, R.layout.item_message, friendlyMessages);
         mMessageListView.setAdapter(mMessageAdapter);
+
+        registerForContextMenu(mMessageListView);
 
         // Initialize progress bar
         mProgressBar.setVisibility(ProgressBar.INVISIBLE);
@@ -234,6 +261,9 @@ public class MainActivity extends AppCompatActivity {
 //
 //        int mId=0;
 //        mNotificationManager.notify(mId, mBuilder.build());
+
+
+
 
 
     }
@@ -421,6 +451,167 @@ public class MainActivity extends AppCompatActivity {
 
 
 
+    @Override
+    public void onCreateContextMenu(ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
+        super.onCreateContextMenu(menu, v, menuInfo);
 
+        AdapterView.AdapterContextMenuInfo info =(AdapterView.AdapterContextMenuInfo)menuInfo;
+        pos = info.position;
+
+        if (v.getId() == R.id.messageListView) {
+            MenuInflater inflater = getMenuInflater();
+            inflater.inflate(R.menu.myop, menu);
+        }
+    }
+
+    @Override
+    public boolean onContextItemSelected(MenuItem item) {
+
+        switch (item.getItemId()) {
+            case R.id.SAVE:
+
+                FriendlyMessage FM = mMessageAdapter.getItem(pos);
+                //remove(td);
+
+                DownloadFileFromURL download = new DownloadFileFromURL();
+
+                download.execute(FM.getPhotoUrl());
+
+                return true;
+
+
+            default:
+                return super.onOptionsItemSelected(item);
+        }
+
+    }
+
+    /**
+     * Showing Dialog
+     * */
+    @Override
+    protected Dialog onCreateDialog(int id) {
+        switch (id) {
+            case progress_bar_type:
+                pDialog = new ProgressDialog(this);
+                pDialog.setMessage("Downloading file. Please wait...");
+                pDialog.setIndeterminate(false);
+                pDialog.setMax(100);
+                pDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+                pDialog.setCancelable(true);
+                pDialog.show();
+                return pDialog;
+            default:
+                return null;
+        }
+    }
+
+
+
+    class DownloadFileFromURL extends AsyncTask<String, String, String> {
+
+        /**
+         * Before starting background thread
+         * Show Progress Bar Dialog
+         * */
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+            showDialog(progress_bar_type);
+        }
+
+
+
+        /**
+         * Downloading file in background thread
+         * */
+        @Override
+        protected String doInBackground(String... f_url) {
+            int count;
+            try {
+                URL url = new URL(f_url[0]);
+                URLConnection conection = url.openConnection();
+                conection.connect();
+                // getting file length
+                int lenghtOfFile = conection.getContentLength();
+
+                String name = f_url[0].substring(f_url[0].length()-12,f_url[0].length());
+
+
+                InputStream input = new BufferedInputStream(url.openStream(), 8192);
+
+                String path = name.concat(".jpg");
+
+                // create a File object for the parent directory
+                File chatDirectory = new File("/sdcard/KChat/Images/");
+// have the object build the directory structure, if needed.
+                chatDirectory.mkdirs();
+// create a File object for the output file
+                File outputFile = new File(chatDirectory, path);
+// now attach the OutputStream to the file object, instead of a String representation
+                FileOutputStream output = new FileOutputStream(outputFile);
+
+                // input stream to read file - with 8k buffer
+//
+//                // Output stream to write file
+//                OutputStream output = new FileOutputStream("/sdcard/Download/");
+
+                byte data[] = new byte[1024];
+
+                long total = 0;
+
+                while ((count = input.read(data)) != -1) {
+                    total += count;
+                    // publishing the progress....
+                    // After this onProgressUpdate will be called
+                    publishProgress(""+(int)((total*100)/lenghtOfFile));
+
+                    // writing data to file
+                    output.write(data, 0, count);
+                }
+
+                // flushing output
+                output.flush();
+
+                // closing streams
+                output.close();
+                input.close();
+
+            } catch (Exception e) {
+                Log.e("Error: ", e.getMessage());
+            }
+
+            return null;
+        }
+
+        /**
+         * Updating progress bar
+         * */
+        protected void onProgressUpdate(String... progress) {
+            // setting progress percentage
+            pDialog.setProgress(Integer.parseInt(progress[0]));
+        }
+
+        /**
+         * After completing background task
+         * Dismiss the progress dialog
+         * **/
+        @Override
+        protected void onPostExecute(String file_url) {
+            // dismiss the dialog after the file was downloaded
+            dismissDialog(progress_bar_type);
+//
+//            // Displaying downloaded image into image view
+//            // Reading image path from sdcard
+//            String imagePath = Environment.getExternalStorageDirectory().toString() + "/downloadedfile.jpg";
+//            // setting downloaded into image view
+//             .setImageDrawable(Drawable.createFromPath(imagePath));
+//
+//            Toast.makeText(this., "Download Completed", Toast.LENGTH_SHORT).show();
+        }
+
+    }
 }
+
+
 
